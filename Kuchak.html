@@ -1,17 +1,165 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Hayren Checker</title>
-  <link rel="stylesheet" href="kuchak_style.css">
+<meta charset="UTF-8">
+<title>Hayren Checker</title>
+<link rel="stylesheet" href="kuchak_style.css">
 </head>
 <body>
-  <div class="container">
-    <h1>Hayren Checker</h1>
-    <textarea id="hayrenInput" placeholder="Paste your 4‑line hayren here..."></textarea>
-    <button id="checkBtn">Check Hayren</button>
-    <div id="results"></div>
-  </div>
-  <script src="kuchak_script.js"></script>
+<div class="container">
+  <h1>Hayren Checker</h1>
+  <p>Paste or write your poem below. This tool will check if it matches the traditional <strong>hayren</strong> form (4 lines, 15 syllables each, split 7 + 8).</p>
+  
+  <textarea id="poemInput" placeholder="Write your hayren here..." rows="8"></textarea>
+  <button id="checkBtn">Check Hayren</button>
+  
+  <div id="result" class="result hidden"></div>
+</div>
+
+<script>
+// ========== CONFIGURATION ==========
+const EXCEPTIONS_SYLLABLES = {
+  "you": 1,
+  "completely": 3,
+};
+const LATIN_VOWELS = "aeiouy";
+const ARMENIAN_VOWELS = ["ա","է","ե","ը","ի","ո","օ","ու","է"];
+
+// ========== HELPERS ==========
+function heuristicSyllableCount(word){
+  let w = word.toLowerCase().replace(/[^a-z\u0560-\u058F']/g, "");
+  if(!w) return 0;
+  if(EXCEPTIONS_SYLLABLES[w] !== undefined) return EXCEPTIONS_SYLLABLES[w];
+  if(/[Ա-Ֆա-ֆ]/u.test(w)){
+    let tmp = w.replace(/ու/g, "U");
+    const armenianVowelsRegex = /[աէեըիոօU]/g;
+    const matches = tmp.match(armenianVowelsRegex);
+    return matches ? matches.length : 0;
+  }
+  let s = w;
+  s = s.replace(/e\b/g, "");
+  const groups = s.match(/[aeiouy]+/g);
+  let count = groups ? groups.length : 0;
+  if(/[^aeiouy][l]e$/.test(word) && !/[aeiouy]le$/.test(word)) count += 1;
+  if(count === 0) count = 1;
+  return count;
+}
+
+function isGibberishWord(word){
+  const w = word.trim();
+  if(!w) return true;
+  const hasLatinVowel = /[aeiouyAEIOUY]/.test(w);
+  const armenianVowelRegex = /[աէեըիոօու]/u;
+  const hasArmenianVowel = armenianVowelRegex.test(w);
+  return !(hasLatinVowel || hasArmenianVowel);
+}
+
+async function fetchSyllablesFromDatamuse(words){
+  const unique = Array.from(new Set(words.map(w => w.toLowerCase())));
+  const results = {};
+  const baseURL = "https://api.datamuse.com/words?";
+  const fetches = unique.map(async (w) => {
+    if(/[Ա-Ֆա-ֆ]/u.test(w)) return;
+    try {
+      const resp = await fetch(baseURL + new URLSearchParams({sp: w, md: "s", max: 1}));
+      if(!resp.ok) return;
+      const data = await resp.json();
+      if(Array.isArray(data) && data.length>0 && data[0].numSyllables) {
+        results[w] = data[0].numSyllables;
+      }
+    } catch (e) {}
+  });
+  await Promise.all(fetches);
+  return results;
+}
+
+async function checkHayren(text, useApi = true){
+  const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
+  const report = {ok:false,reason:null,lines:[],totalSyllables:0};
+
+  if(lines.length !== 4){
+    report.reason = `Expected 4 non-empty lines, found ${lines.length}.`;
+    return report;
+  }
+
+  const allWords = lines.flatMap(ln => ln.split(/[\s,;:.!?—–()«»"“”]+/).filter(Boolean));
+  let apiMap = {};
+  if(useApi){
+    try { apiMap = await fetchSyllablesFromDatamuse(allWords); }
+    catch(e) { apiMap = {}; }
+  }
+
+  let total = 0;
+  for(let i=0;i<lines.length;i++){
+    const words = lines[i].split(/[\s,;:.!?—–()«»"“”]+/).filter(Boolean);
+    const wordInfos = [];
+    let lineSyllTotal = 0;
+    let gibberishWords = [];
+
+    for(const w of words){
+      const key = w.toLowerCase();
+      let syll = EXCEPTIONS_SYLLABLES[key] ?? apiMap[key] ?? heuristicSyllableCount(w);
+      if(isGibberishWord(w)) gibberishWords.push(w);
+      wordInfos.push({word: w, syllables: syll});
+      lineSyllTotal += syll;
+    }
+
+    total += lineSyllTotal;
+    let cum = 0, bestSplitIdx = 0, bestScore = Infinity;
+    for(let j=0;j<wordInfos.length;j++){
+      cum += wordInfos[j].syllables;
+      const first = cum, second = lineSyllTotal - cum;
+      const score = Math.abs(first - 7) + Math.abs(second - 8);
+      if(score < bestScore){
+        bestScore = score;
+        bestSplitIdx = j+1;
+      }
+    }
+    const firstHalf = wordInfos.slice(0,bestSplitIdx).reduce((s,w)=>s+w.syllables,0);
+    const secondHalf = lineSyllTotal - firstHalf;
+    report.lines.push({
+      index:i+1,text:lines[i],syllables:lineSyllTotal,
+      halfSyll:{first:firstHalf,second:secondHalf},
+      matchesPattern:(lineSyllTotal===15 && firstHalf===7 && secondHalf===8),
+      gibberishWords
+    });
+  }
+
+  report.totalSyllables = total;
+  const anyGib = report.lines.some(l=>l.gibberishWords.length>0);
+  const allMatch = report.lines.every(l=>l.matchesPattern);
+  if(anyGib) report.reason = "Some words appear to be gibberish.";
+  else if(!allMatch) report.reason = "Syllable pattern mismatch.";
+  else {
+    report.ok = true;
+    report.reason = "Valid hayren form!";
+  }
+  return report;
+}
+
+// ========== UI ==========
+document.getElementById("checkBtn").addEventListener("click", async () => {
+  const text = document.getElementById("poemInput").value.trim();
+  const resultDiv = document.getElementById("result");
+  resultDiv.classList.remove("hidden");
+  resultDiv.innerHTML = "<p>Checking...</p>";
+  
+  const res = await checkHayren(text, true);
+  let html = `<h2>${res.ok ? "✅" : "❌"} ${res.reason}</h2>`;
+  html += `<p>Total syllables (all lines): ${res.totalSyllables}</p>`;
+  html += `<div class="lines">`;
+  res.lines.forEach(l=>{
+    html += `<div class="line ${l.matchesPattern?"match":"mismatch"}">`;
+    html += `<strong>Line ${l.index}</strong> (${l.syllables} syllables, halves ${l.halfSyll.first}+${l.halfSyll.second})<br>`;
+    html += `<em>${l.text}</em>`;
+    if(l.gibberishWords.length) {
+      html += `<div class="warn">⚠ Gibberish: ${l.gibberishWords.join(", ")}</div>`;
+    }
+    html += `</div>`;
+  });
+  html += `</div>`;
+  resultDiv.innerHTML = html;
+});
+</script>
 </body>
 </html>
