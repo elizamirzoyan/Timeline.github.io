@@ -103,7 +103,7 @@ body {
   @keyframes slideInFromFarRight {
     0% {
       opacity: 0;
-      transform: translateX(30vw); /* start far right (off screen) */
+      transform: translateX(5vw); /* start far right (off screen) */
     }
     100% {
       opacity: 1;
@@ -115,6 +115,46 @@ body {
     opacity: 0; /* must be invisible at start */
     animation: slideInFromFarRight 1s ease-out forwards;
   }
+
+  .scroll-wrapper {
+    position: relative;
+    overflow-x: hidden; /* Hide scrollbar */
+    scroll-behavior: smooth;
+    padding-right: 0;
+    width: 100%;
+  }
+  
+  .timeline {
+    display: flex;
+    gap: 20px;
+    padding: 20px;
+    transition: transform 0.4s ease;
+  }
+  
+  .scroll-btn {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    background-color: rgba(0, 0, 0, 0.4);
+    border: none;
+    border-radius: 12px;
+    padding: 12px;
+    cursor: pointer;
+    z-index: 10;
+    transition: background-color 0.3s;
+  }
+  .scroll-btn:hover {
+    background-color: rgba(0, 0, 0, 0.6);
+  }
+  
+  .scroll-btn.right {
+    right: 10px;
+  }
+  
+  .scroll-btn.left {
+    left: 10px;
+  }
+  
   
   
   footer {
@@ -123,5 +163,14 @@ body {
     font-size: 0.9rem;
     color: #777;
   }
+
+  /* Hide scrollbars for all browsers */
+.scroll-wrapper::-webkit-scrollbar {
+  display: none;
+}
+.scroll-wrapper {
+  -ms-overflow-style: none;  /* IE/Edge */
+  scrollbar-width: none;     /* Firefox */
+}
 
   
